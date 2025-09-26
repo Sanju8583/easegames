@@ -1,0 +1,120 @@
+.table-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: black;
+}
+
+table {
+  background-color: black;
+  margin: 0 auto;
+  border-collapse: collapse;
+}
+
+td {
+  font-size: xxx-large;
+  border: 1px solid white;
+  width: 80px;
+  height: 80px;
+  text-align: center;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+/* Style for selected cells */
+td.selected {
+  background-color: blue;
+}
+
+/* Style for matched pairs */
+td.matched {
+  background-color: #4CAF50;
+  cursor: not-allowed;
+}
+
+/* Headers */
+th {
+  color: white;
+  padding: 10px;
+  font-size: x-large;
+}
+
+/* Text colors for the score and stage */
+h2, h4 {
+  color: white;
+  margin: 10px 0;
+}
+
+/* Button styles */
+button {
+  padding: 10px 20px;
+  font-size: 1rem;
+  cursor: pointer;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  margin: 10px;
+}
+
+button:hover:not(:disabled) {
+  background-color: #45a049;
+}
+
+button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.table-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: sans-serif;
+  min-height: 100vh;
+  width: 100vw;
+  position: fixed;
+  top: 0;
+  left: 0;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  margin-top: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  width: 640px;
+  min-width: 640px;
+  max-width: 100vw;
+  table-layout: fixed;
+}
+
+td {
+  border: 1px solid #ccc;
+  text-align: center;
+  transition: background-color 0.2s ease-in-out;
+  cursor: pointer;
+  width: 80px;
+  height: 80px;
+  min-width: 80px;
+  min-height: 80px;
+  max-width: 80px;
+  max-height: 80px;
+  font-size: 2rem;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* This is the key style for the selected cell! */
+td.selected {
+  background-color: #007bff; /* A nice blue color */
+  color: white;
+  font-weight: bold;
+}
