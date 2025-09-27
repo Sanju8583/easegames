@@ -7,7 +7,7 @@ interface Player {
   date: string;
 }
 
-const ClickableTable = () => {
+const Table = () => {
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const [prevCell, setPrevCell] = useState<string | null>(null);
   const [levelCompleted, setLevelCompleted] = useState(false);
@@ -17,322 +17,552 @@ const ClickableTable = () => {
   const [playerName, setPlayerName] = useState("");
   const [topPlayers, setTopPlayers] = useState<Player[]>([]);
   const [isLLMPlaying, setIsLLMPlaying] = useState(false);
-  const maxStage = 8;
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const maxStage = 4;
+
+  // Place a pair of numbers in specific positions
+  const placePair = (grid: string[][], row1: number, col1: number, row2: number, col2: number, num1: string, num2: string) => {
+    grid[row1][col1] = num1;
+    grid[row2][col2] = num2;
+  };
+
+  // Check if a position is available in the grid
+  const isPositionEmpty = (grid: string[][], row: number, col: number) => {
+    return grid[row][col] === '';
+  };
+
+  // Check if there's a valid path between two cells
+  const hasValidPath = (grid: string[][], row1: number, col1: number, row2: number, col2: number, filledCells: Set<string>): boolean => {
+    // Must be in same row or column
+    if (row1 !== row2 && col1 !== col2) return false;
+
+    if (row1 === row2) {
+      // Same row - check if path is clear
+      const minCol = Math.min(col1, col2);
+      const maxCol = Math.max(col1, col2);
+      for (let col = minCol + 1; col < maxCol; col++) {
+        if (!filledCells.has(`${row1}-${col}`)) {
+          return true; // Found a clear path
+        }
+      }
+    }
+
+    if (col1 === col2) {
+      // Same column - check if path is clear
+      const minRow = Math.min(row1, row2);
+      const maxRow = Math.max(row1, row2);
+      for (let row = minRow + 1; row < maxRow; row++) {
+        if (!filledCells.has(`${row}-${col1}`)) {
+          return true; // Found a clear path
+        }
+      }
+    }
+
+    return false;
+  };
+
+  // Generate the entire grid with AI-guided strategic pair placement
+  const generateGrid = (currentStage: number): string[][] => {
+    const rows = currentStage;
+    const cols = 8;
+    
+    // AI-guided difficulty scaling
+    const difficultyConfig = {
+      equalPairChance: Math.max(0.9 - (currentStage * 0.2), 0.3), // More equal pairs in early stages
+      preferRowPlacement: currentStage <= 2, // Prefer row placements in early stages
+      maxGapBetweenPairs: Math.min(3 + currentStage, 6), // Gradually increase maximum gap
+      clusterProbability: Math.max(0.8 - (currentStage * 0.15), 0.3) // Cluster similar numbers in early stages
+    };
+
+    // Initialize grid with optimal spacing
+    const grid: string[][] = Array(rows).fill(null).map(() => Array(cols).fill(''));
+    const filledCells = new Set<string>();
+    const usedNumbers = new Set<number>();
+    const pairs: Array<[string, string, number]> = []; // Third number is pair difficulty rating
+
+    // Generate pairs with difficulty ratings
+    const pairsNeeded = (rows * cols) / 2;
+    for (let i = 0; i < pairsNeeded; i++) {
+      if (Math.random() < difficultyConfig.equalPairChance) {
+        // Equal pair (easier)
+        let num;
+        do {
+          num = Math.floor(Math.random() * 9) + 1;
+        } while (usedNumbers.has(num));
+        pairs.push([num.toString(), num.toString(), 1]); // Difficulty rating 1 (easy)
+        usedNumbers.add(num);
+      } else {
+        // Sum to 10 pair (harder)
+        let num1;
+        do {
+          num1 = Math.floor(Math.random() * 9) + 1;
+        } while (usedNumbers.has(num1) || usedNumbers.has(10 - num1));
+        const num2 = 10 - num1;
+        pairs.push([num1.toString(), num2.toString(), 2]); // Difficulty rating 2 (harder)
+        usedNumbers.add(num1);
+        usedNumbers.add(num2);
+      }
+    }
+
+    // Sort pairs by difficulty - place easier pairs first in early stages
+    if (currentStage <= 2) {
+      pairs.sort((a, b) => a[2] - b[2]);
+    } else {
+      // Mix difficulties in later stages
+      pairs.sort(() => Math.random() - 0.5);
+    }
+
+    // Smart pair placement strategy
+    for (const [num1, num2, difficulty] of pairs) {
+      let bestPlacement = null;
+      let bestScore = -1;
+
+      // Try all possible placements and score them
+      for (let row = 0; row < rows; row++) {
+        for (let col1 = 0; col1 < cols; col1++) {
+          if (!isPositionEmpty(grid, row, col1)) continue;
+
+          // Try row placement
+          for (let col2 = col1 + 1; col2 < cols; col2++) {
+            if (!isPositionEmpty(grid, row, col2)) continue;
+            if (hasValidPath(grid, row, col1, row, col2, filledCells)) {
+              const score = scorePlacement(row, col1, row, col2, difficulty, difficultyConfig);
+              if (score > bestScore) {
+                bestScore = score;
+                bestPlacement = { type: 'row', row, col1, col2 };
+              }
+            }
+          }
+
+          // Try column placement if appropriate
+          for (let row2 = row + 1; row2 < rows; row2++) {
+            if (!isPositionEmpty(grid, row2, col1)) continue;
+            if (hasValidPath(grid, row, col1, row2, col1, filledCells)) {
+              const score = scorePlacement(row, col1, row2, col1, difficulty, difficultyConfig);
+              if (score > bestScore) {
+                bestScore = score;
+                bestPlacement = { type: 'col', row1: row, row2, col: col1 };
+              }
+            }
+          }
+        }
+      }
+
+      // Place the pair in the best position found
+      if (bestPlacement) {
+        if (bestPlacement.type === 'row') {
+          grid[bestPlacement.row][bestPlacement.col1] = num1;
+          grid[bestPlacement.row][bestPlacement.col2] = num2;
+          filledCells.add(`${bestPlacement.row}-${bestPlacement.col1}`);
+          filledCells.add(`${bestPlacement.row}-${bestPlacement.col2}`);
+        } else {
+          grid[bestPlacement.row1][bestPlacement.col] = num1;
+          grid[bestPlacement.row2][bestPlacement.col] = num2;
+          filledCells.add(`${bestPlacement.row1}-${bestPlacement.col}`);
+          filledCells.add(`${bestPlacement.row2}-${bestPlacement.col}`);
+        }
+      } else {
+        // If no valid placement found, fall back to simple pattern
+        return generateSimpleGrid(currentStage);
+      }
+    }
+
+    return grid;
+  };
+
+  // Helper function to score a potential pair placement
+  const scorePlacement = (row1: number, col1: number, row2: number, col2: number, difficulty: number, config: any): number => {
+    let score = 0;
+    const distance = Math.abs(row1 - row2) + Math.abs(col1 - col2);
+    
+    // Prefer shorter distances in early stages, longer in later stages
+    if (difficulty === 1) { // Easy pairs
+      score += config.preferRowPlacement ? (10 - distance) : distance;
+    } else { // Harder pairs
+      score += config.preferRowPlacement ? distance : (10 - distance);
+    }
+
+    // Bonus for row placement in early stages
+    if (row1 === row2 && config.preferRowPlacement) {
+      score += 5;
+    }
+
+    // Penalty for exceeding max gap
+    if (distance > config.maxGapBetweenPairs) {
+      score -= 10;
+    }
+
+    return score;
+  };
+
+  // Generate a simple, guaranteed solvable grid
+  const generateSimpleGrid = (currentStage: number): string[][] => {
+    const rows = currentStage;
+    const cols = 8;
+    const grid: string[][] = Array(rows).fill(null).map(() => Array(cols).fill(''));
+    const usedNumbers = new Set<number>();
+    
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col += 2) {
+        let num;
+        if (Math.random() < 0.5) {
+          // Equal pair
+          do {
+            num = Math.floor(Math.random() * 9) + 1;
+          } while (usedNumbers.has(num));
+          grid[row][col] = num.toString();
+          grid[row][col + 1] = num.toString();
+          usedNumbers.add(num);
+        } else {
+          // Sum to 10 pair
+          do {
+            num = Math.floor(Math.random() * 9) + 1;
+          } while (usedNumbers.has(num) || usedNumbers.has(10 - num));
+          grid[row][col] = num.toString();
+          grid[row][col + 1] = (10 - num).toString();
+          usedNumbers.add(num);
+          usedNumbers.add(10 - num);
+        }
+      }
+    }
+    return grid;
+  };
+
+  // Initialize table data with generated grid
+  const [tableData, setTableData] = useState<string[][]>(() => generateGrid(1));
 
   useEffect(() => {
     fetchTopPlayers();
   }, []);
 
   const fetchTopPlayers = async () => {
+    setIsLoading(true);
+    setError(null);
     try {
-      const response = await fetch('http://localhost:8000/api/top-players');
+      const response = await fetch('/api/top-players');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const data = await response.json();
       setTopPlayers(data);
     } catch (error) {
       console.error('Error fetching top players:', error);
+      setError('Failed to load top players. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  // List of fun AI player names
+  const aiNames = [
+    "QuantumQuester", "ByteBrain", "NeuroPro", "LogicLeap", "DataDynamo",
+    "SynapticSage", "AlgoAce", "CipherSolver", "MindMatrix", "PatternPro",
+    "GridGuru", "MatchMaster", "NumberNinja", "PuzzlePro", "BrainBox",
+    "CognitiveCracker", "IntelliPlay", "MemoryMaster", "SpeedSolver", "GridGenius"
+  ];
+
+  const getRandomAIName = () => {
+    return aiNames[Math.floor(Math.random() * aiNames.length)];
   };
 
   const startLLMGames = async () => {
     setIsLLMPlaying(true);
+    setError(null);
+    const startTime = Date.now();
+    let gamesCompleted = 0;
+    const aiName = getRandomAIName();
+    
     try {
-      await fetch('http://localhost:8000/api/llm-play', {
-        method: 'POST'
+      setError(`🤖 ${aiName} is starting to play...\nGame 1/20 - Level 1`);
+      
+      const response = await fetch('/api/llm-play', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ playerName: aiName }) // Send AI name to backend
       });
-      fetchTopPlayers(); // Refresh leaderboard after LLM games
-    } catch (error) {
-      console.error('Error starting LLM games:', error);
-    }
-    setIsLLMPlaying(false);
-  };
-
-  // Generate stage data with guaranteed matching pairs and increasing difficulty
-  const generateRow = (currentStage: number): string[] => {
-    const pairs: Array<[string, string]> = [];
-    
-    // As stage increases, prefer sum-to-10 pairs over equal pairs
-    const equalPairProbability = Math.max(0.7 - (currentStage * 0.1), 0.2); // Decreases from 0.7 to 0.2
-    
-    for (let i = 0; i < 4; i++) {
-      const pairType = Math.random() < equalPairProbability ? 'equal' : 'sum10';
       
-      if (pairType === 'equal') {
-        // For equal pairs, use larger numbers in later stages
-        const minNum = Math.min(currentStage, 5); // Minimum number increases with stage
-        const num = minNum + Math.floor(Math.random() * (9 - minNum + 1));
-        pairs.push([num.toString(), num.toString()]);
-      } else {
-        // For sum-to-10 pairs, try to use numbers further apart in later stages
-        let num1: number;
-        if (currentStage <= 3) {
-          // Early stages: prefer middle numbers (3-7)
-          num1 = 3 + Math.floor(Math.random() * 5);
-        } else {
-          // Later stages: prefer extreme numbers (1-2 or 8-9)
-          num1 = Math.random() < 0.5 ? 
-                 1 + Math.floor(Math.random() * 2) : // 1 or 2
-                 8 + Math.floor(Math.random() * 2);  // 8 or 9
-        }
-        const num2 = 10 - num1;
-        pairs.push([num1.toString(), num2.toString()]);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
-    }
 
-    // Distribute pairs to ensure at least one solution path exists
-    // Place pairs with some space between them for higher stages
-    const result = new Array(8).fill('');
-    pairs.forEach(([num1, num2]) => {
-      // For higher stages, try to place pairs further apart
-      const spacing = Math.min(2 + Math.floor(currentStage / 2), 4); // Increases with stage
-      let pos1: number, pos2: number;
+      // Set up event source for progress updates
+      const eventSource = new EventSource('/api/llm-play-progress');
       
-      do {
-        pos1 = Math.floor(Math.random() * (8 - spacing));
-        pos2 = pos1 + spacing;
-      } while (result[pos1] !== '' || result[pos2] !== '');
+      eventSource.onmessage = (event) => {
+        const progress = JSON.parse(event.data);
+        gamesCompleted = progress.gamesCompleted;
+        const currentGame = progress.currentGame || gamesCompleted;
+        const currentLevel = progress.currentLevel || 1;
+        const matchesInLevel = progress.matchesInLevel || 0;
+        
+        setError(
+          `🤖 ${aiName} is playing...\n` +
+          `Game ${currentGame}/20 - Level ${currentLevel}\n` +
+          `Matches found: ${matchesInLevel}/8\n` +
+          `Games completed: ${gamesCompleted}\n` +
+          `Time elapsed: ${((Date.now() - startTime) / 1000).toFixed(1)} seconds`
+        );
+      };
       
-      result[pos1] = num1;
-      result[pos2] = num2;
-    });
-
-    // Fill any remaining empty spots
-    const filledPositions = result.map((val, idx) => val !== '' ? idx : -1).filter(idx => idx !== -1);
-    const emptyPositions = result.map((val, idx) => val === '' ? idx : -1).filter(idx => idx !== -1);
-    
-    emptyPositions.forEach(pos => {
-      // Find the closest filled position
-      const closestFilled = filledPositions.reduce((closest, filled) => 
-        Math.abs(filled - pos) < Math.abs(closest - pos) ? filled : closest
+      const result = await response.json();
+      eventSource.close();
+      
+      const totalTime = (Date.now() - startTime) / 1000;
+      console.log('LLM games result:', result);
+      
+      setError(
+        `✅ ${aiName} completed 20 games in ${totalTime.toFixed(1)} seconds!\n` +
+        `🎯 Average score: ${(result.total_score / 20).toFixed(1)}\n` +
+        `⏱️ Average time per game: ${result.average_time_per_game.toFixed(1)} seconds\n` +
+        `🏆 High score: ${result.highest_score}`
       );
-      const baseNum = parseInt(result[closestFilled]);
-      // Place a number that can't form a pair with nearby numbers
-      let newNum;
-      do {
-        newNum = 1 + Math.floor(Math.random() * 9);
-      } while (newNum === baseNum || newNum === (10 - baseNum));
-      result[pos] = newNum.toString();
-    });
-
-    return result;
+              
+      await fetchTopPlayers();
+    } catch (error: any) {
+      console.error('Error starting LLM games:', error);
+      setError(`❌ Error: ${aiName} encountered an issue - ${error.message}`);
+    } finally {
+      setIsLLMPlaying(false);
+    }
   };
 
-  // State for storing the row data
-  const [tableData, setTableData] = useState<string[][]>(() => {
-    return [generateRow(1)]; // Start with stage 1 difficulty
-  });
-
-  // Check if two cells are reachable (no unmatched cells between them)
-  const areCellsReachable = (row1: number, col1: number, row2: number, col2: number): boolean => {
-    // Same cell is not reachable
-    if (row1 === row2 && col1 === col2) return false;
-
+  // Check if two cells are in a straight line and have no unmatched cells between them
+  const areCellsInClearLine = (row1: number, col1: number, row2: number, col2: number): boolean => {
     // Check if cells are in the same row
     if (row1 === row2) {
       const minCol = Math.min(col1, col2);
       const maxCol = Math.max(col1, col2);
-      // Check all cells between them
+      // Check all cells between them in the row
       for (let col = minCol + 1; col < maxCol; col++) {
-        // If there's an unmatched cell between them, they're not reachable
         if (!matchedCells.has(`${row1}-${col}`)) {
-          return false;
+          return false; // Found an unmatched cell between them
         }
       }
       return true;
     }
-
+    
     // Check if cells are in the same column
     if (col1 === col2) {
       const minRow = Math.min(row1, row2);
       const maxRow = Math.max(row1, row2);
-      // Check all cells between them
+      // Check all cells between them in the column
       for (let row = minRow + 1; row < maxRow; row++) {
-        // If there's an unmatched cell between them, they're not reachable
         if (!matchedCells.has(`${row}-${col1}`)) {
-          return false;
+          return false; // Found an unmatched cell between them
         }
       }
       return true;
     }
-
-    // Not in same row or column
-    return false;
+    
+    return false; // Cells are not in a straight line
   };
 
   const handleCellClick = (rowIdx: number, colIdx: number) => {
     if (levelCompleted || isLLMPlaying) return;
     const cellId = `${rowIdx}-${colIdx}`;
 
-    // Don't allow clicking already matched cells
     if (matchedCells.has(cellId)) return;
 
     const currentValue = tableData[rowIdx][colIdx];
     
-    // If this is the first click of a pair
     if (!selectedCell) {
       setSelectedCell(cellId);
       setPrevCell(null);
-      return;
-    }
-    
-    // This is the second click
-    const [pRow, pCol] = selectedCell.split('-').map(Number);
-    const prevValue = tableData[pRow][pCol];
-    
-    // If clicking the same cell, ignore it
-    if (cellId === selectedCell) return;
+    } else {
+      const [prevRow, prevCol] = selectedCell.split('-').map(Number);
+      const previousValue = tableData[prevRow][prevCol];
 
-    // Check if values match and cells are reachable
-    if ((prevValue === currentValue || Number(prevValue) + Number(currentValue) === 10) && 
-        areCellsReachable(pRow, pCol, rowIdx, colIdx)) {
-      const newMatchedCells = new Set(matchedCells);
-      newMatchedCells.add(selectedCell);
-      newMatchedCells.add(cellId);
-      setMatchedCells(newMatchedCells);
-      setSelectedCell(null);
-      setPrevCell(null);
+      if (selectedCell === cellId) {
+        setSelectedCell(null);
+        setPrevCell(null);
+      } else if (
+        (parseInt(currentValue) === parseInt(previousValue) || 
+         parseInt(currentValue) + parseInt(previousValue) === 10) &&
+        areCellsInClearLine(prevRow, prevCol, rowIdx, colIdx)
+      ) {
+        const newMatchedCells = new Set(matchedCells);
+        newMatchedCells.add(selectedCell);
+        newMatchedCells.add(cellId);
+        setMatchedCells(newMatchedCells);
+        setSelectedCell(null);
+        setPrevCell(null);
 
-      // Check if all cells in current stage are matched
-      const stageTotal = tableData.reduce((sum, row) => sum + row.length, 0);
-      if (newMatchedCells.size === stageTotal) {
-        // Add score for completing the stage
-        setScore(prevScore => prevScore + 100 * stage);
-
-        // Auto advance to next stage
-        if (stage < maxStage) {
-          setTimeout(() => {
-            setStage(s => s + 1);
-            setLevelCompleted(false);
-            setSelectedCell(null);
-            setPrevCell(null);
-            setMatchedCells(new Set());
-            
-            // Generate new data for the next stage
-            setTableData(prevData => {
-              const newData = [...prevData];
-              newData.push(generateRow(stage + 1)); // Use next stage number for difficulty
-              return newData;
-            });
-          }, 1000); // Wait 1 second before advancing
-        } else {
+        // Check if level is complete
+        if (newMatchedCells.size === tableData.length * 8) {
           setLevelCompleted(true);
-          // Save score if player name is entered
-          if (playerName) {
-            const player: Player = {
-              name: playerName,
-              score: score + 100 * stage, // Include final stage score
-              date: new Date().toISOString()
-            };
-            fetch('http://localhost:8000/api/save-score', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(player)
-            }).then(() => {
-              fetchTopPlayers();
-            });
+          const newScore = score + 100 * stage;
+          setScore(newScore);
+
+          // If all stages completed, submit score
+          if (stage === maxStage) {
+            if (playerName) {
+              fetch('/api/save-score', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  name: playerName,
+                  score: newScore,
+                  date: new Date().toISOString()
+                })
+              }).then(() => fetchTopPlayers());
+            }
           }
         }
+      } else {
+        setSelectedCell(null);
+        setPrevCell(selectedCell);
       }
-    } else {
-      // No match - reset selection
-      setSelectedCell(null);
-      setPrevCell(selectedCell);
     }
   };
 
-  // Handler to reset the level
-  const handleResetLevel = () => {
+  const handleNextLevel = () => {
+    if (levelCompleted && stage < maxStage) {
+      const nextStage = stage + 1;
+      setStage(nextStage);
+      setTableData(generateGrid(nextStage));
+      setLevelCompleted(false);
+      setSelectedCell(null);
+      setPrevCell(null);
+      setMatchedCells(new Set());
+    }
+  };
+
+  const handleResetGame = () => {
+    setTableData(generateGrid(1));
+    setStage(1);
+    setScore(0);
     setLevelCompleted(false);
     setSelectedCell(null);
     setPrevCell(null);
     setMatchedCells(new Set());
-    setStage(1);
-    setScore(0);
-    // Reset table data with one row
-    setTableData([generateRow(1)]); // Reset with stage 1 difficulty
+    setPlayerName(""); // Reset player name too
+    const name = prompt("Enter your name for the new game:");
+    if (name) setPlayerName(name);
   };
 
+  if (error) {
+    return (
+      <div style={{ padding: '20px', textAlign: 'center' }}>
+        <p style={{ color: 'red', whiteSpace: 'pre-line' }}>{error}</p>
+        <button onClick={() => { setError(null); fetchTopPlayers(); }}>Retry</button>
+      </div>
+    );
+  }
+
   return (
-    <div className="table-container">
-      <div style={{ width: '100%', maxWidth: 900, margin: '0 auto', padding: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+    <div className="game-container">
+      <div style={{ maxWidth: '900px', margin: '0 auto', padding: '20px' }}>
+        <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 style={{ margin: 0 }}>Stage {stage}</h2>
+            <p style={{ margin: '10px 0' }}>Score: {score}</p>
           </div>
           <div>
-            <h3 style={{ margin: 0 }}>Score: {score}</h3>
+            {!playerName && (
+              <button onClick={() => {
+                const name = prompt("Enter your name:");
+                if (name) setPlayerName(name);
+              }}>Set Name</button>
+            )}
+            <button 
+              onClick={startLLMGames} 
+              disabled={isLLMPlaying}
+              style={{ marginLeft: '10px' }}
+            >
+              {isLLMPlaying ? 'LLM Playing...' : 'Let LLM Play'}
+            </button>
+            <button 
+              onClick={handleResetGame}
+              style={{ marginLeft: '10px' }}
+            >
+              Reset Game
+            </button>
           </div>
-          <div>
-            <h4 style={{ margin: 0 }}>Matched Pairs: {matchedCells.size / 2}</h4>
-          </div>
-        </div>
-        
-        <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
-          <input
-            type="text"
-            placeholder="Enter your name"
-            value={playerName}
-            onChange={(e) => setPlayerName(e.target.value)}
-            style={{ padding: '5px' }}
-          />
-          <button onClick={startLLMGames} disabled={isLLMPlaying}>
-            {isLLMPlaying ? 'LLM is Playing...' : 'Start LLM Games'}
-          </button>
-          <button onClick={handleResetLevel}>Reset Level</button>
         </div>
 
         <div style={{ display: 'flex', gap: '20px' }}>
           <div style={{ flex: '1' }}>
-            <table>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 {tableData.map((row, rowIdx) => (
                   <tr key={rowIdx}>
                     {row.map((cell, colIdx) => {
                       const cellId = `${rowIdx}-${colIdx}`;
-                      const isSelected = selectedCell === cellId;
-                      const isPrev = prevCell === cellId;
                       const isMatched = matchedCells.has(cellId);
-
+                      const isSelected = selectedCell === cellId;
+                      const isPrevious = prevCell === cellId;
+                      
                       return (
                         <td
                           key={cellId}
-                          className={`
-                            ${isSelected || isPrev ? 'selected' : ''}
-                            ${isMatched ? 'matched' : ''}
-                          `}
-                          onClick={!isMatched ? () => handleCellClick(rowIdx, colIdx) : undefined}
+                          onClick={() => handleCellClick(rowIdx, colIdx)}
+                          style={{
+                            border: '1px solid #ccc',
+                            width: '12.5%',
+                            aspectRatio: '1',
+                            cursor: isMatched ? 'default' : 'pointer',
+                            background: isMatched ? '#90EE90' : 
+                                      isSelected ? '#FFD700' :
+                                      isPrevious ? '#FFA07A' : 'transparent',
+                            transition: 'background-color 0.3s',
+                            textAlign: 'center',
+                            fontSize: '1.2em',
+                            userSelect: 'none',
+                            color: 'white'
+                          }}
                         >
-                          {cell}
+                          {isMatched ? '✓' : cell}
                         </td>
                       );
                     })}
-                    {[...Array(8 - row.length)].map((_, i) => (
-                      <td key={`empty-${rowIdx}-${i}`}></td>
-                    ))}
                   </tr>
                 ))}
               </tbody>
             </table>
+
+            {levelCompleted && stage < maxStage && (
+              <button 
+                onClick={handleNextLevel}
+                style={{ marginTop: '20px' }}
+              >
+                Next Level
+              </button>
+            )}
           </div>
           
-          <div style={{ flex: '0 0 300px', background: '#222', padding: '20px', borderRadius: '8px' }}>
-            <h3 style={{ color: 'white', marginTop: 0 }}>Top Players</h3>
-            <div style={{ color: 'white' }}>
-              {topPlayers.map((player, index) => (
-                <div key={index} style={{ 
-                  padding: '8px', 
-                  marginBottom: '4px', 
-                  background: 'rgba(255,255,255,0.1)',
-                  borderRadius: '4px',
-                  display: 'flex',
-                  justifyContent: 'space-between'
-                }}>
-                  <span>{index + 1}. {player.name}</span>
-                  <span>{player.score}</span>
-                </div>
-              ))}
-            </div>
+          <div style={{ 
+            width: '250px',
+            padding: '20px',
+            borderRadius: '8px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          }}>
+            <h3 style={{ margin: '0 0 15px 0' }}>Top Players</h3>
+            {isLoading ? (
+              <p>Loading...</p>
+            ) : (
+              <div>
+                {topPlayers.map((player, index) => (
+                  <div key={index} style={{ 
+                    padding: '8px',
+                    marginBottom: '8px',
+                    background: 'white',
+                    borderRadius: '4px',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                    display: 'flex',
+                    justifyContent: 'space-between'
+                  }}>
+                    <span>{player.name}</span>
+                    <span>{player.score}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -340,4 +570,4 @@ const ClickableTable = () => {
   );
 };
 
-export default ClickableTable;
+export default Table;

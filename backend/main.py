@@ -32,16 +32,33 @@ class Player(BaseModel):
 # Store top players
 players: List[Player] = []
 
+# Get the absolute path for players.json
+import os
+PLAYERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'players.json')
+
 def save_players():
-    with open('players.json', 'w') as f:
-        json.dump([p.dict() for p in players], f)
+    try:
+        with open(PLAYERS_FILE, 'w') as f:
+            json.dump([{"name": p.name, "score": p.score, "date": p.date} for p in players], f, indent=2)
+            print(f"Saved players to {PLAYERS_FILE}")
+    except Exception as e:
+        print(f"Error saving players to {PLAYERS_FILE}: {e}")
 
 def load_players():
     try:
-        with open('players.json', 'r') as f:
+        if not os.path.exists(PLAYERS_FILE):
+            with open(PLAYERS_FILE, 'w') as f:
+                json.dump([], f)
+            print(f"Created empty players file at {PLAYERS_FILE}")
+            return []
+            
+        with open(PLAYERS_FILE, 'r') as f:
             data = json.load(f)
-            return [Player(**p) for p in data]
-    except:
+            loaded_players = [Player(**p) for p in data]
+            print(f"Loaded {len(loaded_players)} players from {PLAYERS_FILE}")
+            return loaded_players
+    except Exception as e:
+        print(f"Error loading players from {PLAYERS_FILE}: {e}", flush=True)
         return []
 
 players = load_players()
@@ -68,17 +85,20 @@ async def llm_play():
     """Play 20 games automatically using LLM strategy"""
     total_score = 0
     games_played = 0
+    start_time = datetime.now()
     
     while games_played < 20:
+        game_start = datetime.now()
         # Initialize new game
         stage = 1
         score = 0
         board = [[str(random.randint(1, 9)) for _ in range(8)]]
         matched = set()
         
+        print(f"Starting game {games_played + 1}/20")
         while stage <= 8:
             move1, move2 = find_best_move(board)
-            if not move1 or not move2:
+            if move1 is None or move2 is None:
                 break
                 
             # Mark cells as matched
@@ -95,6 +115,9 @@ async def llm_play():
         total_score += score
         games_played += 1
         
+        game_time = (datetime.now() - game_start).total_seconds()
+        print(f"Completed game {games_played}/20 with score {score} in {game_time:.1f} seconds")
+        
         # Save score
         player = Player(
             name=f"LLM_Player_{games_played}",
@@ -107,7 +130,14 @@ async def llm_play():
         # Small delay to not overload
         await asyncio.sleep(0.1)
     
-    return {"message": f"Played {games_played} games, average score: {total_score/games_played}"}
+    total_time = (datetime.now() - start_time).total_seconds()
+    avg_time_per_game = total_time / 20
+    return {
+        "message": f"Played {games_played} games, average score: {total_score/games_played}",
+        "total_time": total_time,
+        "average_time_per_game": avg_time_per_game,
+        "total_score": total_score
+    }
 
 @app.get("/api/top-players")
 async def get_top_players():
@@ -115,8 +145,20 @@ async def get_top_players():
     sorted_players = sorted(players, key=lambda x: x.score, reverse=True)
     return sorted_players[:10]
 
+# Add a root endpoint
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the game server! Available endpoints: /api/llm-play and /api/top-players"}
+
 # Run on startup
 @app.on_event("startup")
 async def startup_event():
     global players
     players = load_players()
+    print("Server started! Available endpoints: /api/llm-play and /api/top-players")
+
+# Run on shutdown
+@app.on_event("shutdown")
+async def shutdown_event():
+    save_players()
+    print("Server shutting down, saved players data")
